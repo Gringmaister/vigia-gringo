@@ -1,0 +1,91 @@
+# Vigía externo de Gringo Labs — S327 (2026-08-18)
+#
+# Corre EN GITHUB, fuera del VPS: es el único aviso que funciona cuando el
+# servidor está congelado (la trabada del 18-ago dejó SSH y todo lo interno
+# muerto — ningún watchdog del propio VPS puede avisar de eso).
+#
+# Cada 10 min chequea las webs públicas. Si alguna no responde, espera 60s,
+# re-chequea SOLO las caídas, y recién ahí manda Telegram (evita falsos
+# positivos por un parpadeo de red del runner).
+#
+# ⚠️ Repo PÚBLICO a propósito (Actions gratis e ilimitado). Acá no puede haber
+# ningún secreto ni dato interno: solo URLs que ya son públicas. El token de
+# Telegram vive en los Secrets del repo, nunca en este archivo.
+
+name: vigia
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      prueba:
+        description: "mandar un Telegram de prueba (si/no)"
+        required: false
+        default: "no"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vigia
+  cancel-in-progress: false
+
+jobs:
+  vigia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: chequear las webs
+        id: chk
+        run: |
+          check() { curl -sL -m 20 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000; }
+          URLS="https://office.gringo.estate https://gringopms.com https://ambbi.ar"
+          caidos=""
+          for u in $URLS; do
+            c=$(check "$u")
+            case "$c" in 2*|3*|401|403) ;; *) caidos="$caidos $u($c)";; esac
+          done
+          # segunda pasada solo sobre lo caido, 60s despues
+          if [ -n "$caidos" ]; then
+            sleep 60
+            recon=""
+            for u in $URLS; do
+              case "$caidos" in *"$u"*) ;; *) continue;; esac
+              c=$(check "$u")
+              case "$c" in 2*|3*|401|403) ;; *) recon="$recon $u($c)";; esac
+            done
+            caidos="$recon"
+          fi
+          echo "caidos=${caidos}" >> "$GITHUB_OUTPUT"
+
+      - name: avisar por Telegram
+        if: steps.chk.outputs.caidos != '' || github.event.inputs.prueba == 'si'
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CAIDOS: ${{ steps.chk.outputs.caidos }}
+        run: |
+          if [ -n "$CAIDOS" ]; then
+            MSG=$(printf '🔴 VIGÍA EXTERNO (corre en GitHub)\n\nEl VPS no responde desde afuera:\n%s\n\nChequeado 2 veces con 60s de diferencia. Si SSH tampoco entra, es el cuadro del 18-ago: panel de Contabo → Restart.' "$CAIDOS")
+          else
+            MSG='🧪 Vigía externo: Telegram de PRUEBA OK. Este canal avisa aunque el VPS esté congelado por completo.'
+          fi
+          curl -s -o /dev/null "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="${CHAT}" --data-urlencode text="$MSG"
+
+      # GitHub desactiva los crons de un repo sin actividad a los 60 días.
+      # Un commit vacío por mes lo mantiene vivo.
+      - name: latido mensual
+        if: github.event_name == 'schedule'
+        run: |
+          MES=$(date -u +%Y-%m)
+          git clone --depth 1 "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" latido-repo
+          cd latido-repo
+          if [ "$(cat latido.txt 2>/dev/null)" != "$MES" ]; then
+            echo "$MES" > latido.txt
+            git config user.name "vigia"
+            git config user.email "vigia@users.noreply.github.com"
+            git add latido.txt
+            git commit -m "latido $MES"
+            git push
+          fi
