@@ -39,7 +39,7 @@ jobs:
         id: chk
         run: |
           check() { curl -sL -m 20 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000; }
-          URLS="https://office.gringo.estate https://gringopms.com https://ambbi.ar"
+          URLS="https://office.gringo.estate https://gringopms.com https://ambbi.ar https://api.hyve.com.ar/salud"
           caidos=""
           for u in $URLS; do
             c=$(check "$u")
@@ -66,7 +66,7 @@ jobs:
           CAIDOS: ${{ steps.chk.outputs.caidos }}
         run: |
           if [ -n "$CAIDOS" ]; then
-            MSG=$(printf '🔴 VIGÍA EXTERNO (corre en GitHub)\n\nEl VPS no responde desde afuera:\n%s\n\nChequeado 2 veces con 60s de diferencia. Si SSH tampoco entra, es el cuadro del 18-ago: panel de Contabo → Restart.' "$CAIDOS")
+            MSG=$(printf '🔴 VIGÍA EXTERNO (corre en GitHub)\n\nEl VPS no responde desde afuera:\n%s\n\nChequeado 2 veces con 60s de diferencia. Si SSH tampoco entra, es el cuadro del 18-ago: panel de Contabo → Restart. Si api.hyve.com.ar está en la lista, el MOSTRADOR de HYVE no deja entrar por cara ni QR hasta que vuelva.' "$CAIDOS")
           else
             MSG='🧪 Vigía externo: Telegram de PRUEBA OK. Este canal avisa aunque el VPS esté congelado por completo.'
           fi
